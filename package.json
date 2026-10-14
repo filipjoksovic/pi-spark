@@ -1,0 +1,9 @@
+{
+  "name": "pi-spark",
+  "version": "1.0.0",
+  "description": "Pi package for Qwen3.8-Flash-Next served by vLLM on a DGX Spark: registers the provider and switches on hybrid thinking.",
+  "keywords": ["pi-package", "qwen", "vllm", "dgx-spark"],
+  "pi": {
+    "extensions": ["./extensions/spark.ts"]
+  }
+}
