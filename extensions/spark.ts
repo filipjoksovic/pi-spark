@@ -21,7 +21,8 @@ import { type ExtensionAPI } from "@earendil-works/pi-coding-agent";
  *   SPARK_CONTEXT / contextWindow   context window in tokens (default 500000)
  *   QWEN_THINKING / thinking        off, on or hybrid: force a mode regardless of pi's level
  *   QWEN_THINK_EVERY / thinkEvery   re-plan interval in hybrid mode (default 8, 0 = never)
- *   QWEN_CALL_LIMIT / callLimit     tool calls per prompt before the model is told to finish (default 80, 0 = no limit)
+ *   QWEN_CALL_LIMIT / callLimit     tool calls per prompt before the model is told to finish, and stopped 10 calls
+ *                                   later if it keeps going (default 80, 0 = no limit)
  */
 
 type Settings = Partial<Record<"url" | "apiKey" | "model" | "contextWindow" | "thinking" | "thinkEvery" | "callLimit", string | number>>;
@@ -87,13 +88,18 @@ export default function (pi: ExtensionAPI) {
 		if (event.isError) failedSinceLastRequest = true;
 	});
 
-	pi.on("tool_call", async () => {
-		if (!active) return undefined;
+	// Counted here rather than in tool_call: pi rejects calls with invalid arguments or unknown tool names
+	// before tool_call fires, so a model stuck repeating a broken call would never reach the limit.
+	pi.on("tool_execution_start", (_event, ctx) => {
+		if (!active) return;
 		calls++;
-		if (callLimit > 0 && calls > callLimit) {
-			return { block: true, reason: `[budget] ${callLimit} tool calls used for this prompt. Stop calling tools: finish now with what you have, and say what you could not check.` };
-		}
-		return undefined;
+		// Those rejected calls can't be blocked either, so stop the prompt if the model keeps going well past the limit.
+		if (callLimit > 0 && calls > callLimit + 10) ctx.abort();
+	});
+
+	pi.on("tool_call", async () => {
+		if (!active || callLimit <= 0 || calls <= callLimit) return undefined;
+		return { block: true, reason: `[budget] ${callLimit} tool calls used for this prompt. Stop calling tools: finish now with what you have, and say what you could not check.` };
 	});
 
 	pi.on("before_provider_request", (event, ctx) => {

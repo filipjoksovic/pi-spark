@@ -29,7 +29,9 @@ went wrong, and on every 8th request so it can re-plan during longer tasks. The 
 directly. In one typical run Qwen ended up thinking on 7 of its 35 requests and still got everything right.
 
 It also refuses further tool calls after 80 calls in a single prompt and asks the model to finish with what
-it has, as a guard against runaway loops. Other providers and models are left alone.
+it has, as a guard against runaway loops. If the model ignores that and makes 10 more calls, the prompt is
+stopped. That second step matters for calls pi rejects before any extension sees them, like a call with a
+missing argument, which a model can otherwise repeat forever. Other providers and models are left alone.
 
 ## Results
 
@@ -67,7 +69,7 @@ pi install git:github.com/filipjoksovic/pi-spark
 
 Then pick "Qwen3.8 Flash Next (Spark)" in pi or start it with `pi --model spark/qwen3.8-flash-next`. You
 don't need to add anything to `models.json`. To update, run `pi update --extensions`, and if you want to stay
-on a fixed version, install `git:github.com/filipjoksovic/pi-spark@v1.0.0` instead.
+on a fixed version, install `git:github.com/filipjoksovic/pi-spark@v1.1.0` instead.
 
 The thinking mode follows pi's own thinking level, so you change it the same way as for any other model:
 
