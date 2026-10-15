@@ -31,7 +31,15 @@ directly. In one typical run Qwen ended up thinking on 7 of its 35 requests and 
 It also refuses further tool calls after 80 calls in a single prompt and asks the model to finish with what
 it has, as a guard against runaway loops. If the model ignores that and makes 10 more calls, the prompt is
 stopped. That second step matters for calls pi rejects before any extension sees them, like a call with a
-missing argument, which a model can otherwise repeat forever. Other providers and models are left alone.
+missing argument, which a model can otherwise repeat forever.
+
+Two smaller habits are steered as well, because on the Spark every token the model writes costs time. A note
+in the system prompt asks Qwen to change files with `edit` instead of rewriting them and to check its work
+through the project's tests rather than throwaway scripts, and a `write` that would replace an existing file
+longer than 50 lines is refused with a request to edit instead. In a small test on a real task (five runs
+each), this cut what Qwen wrote by about 30%, and three of five runs finished correctly within 15 minutes
+against none without it. Qwen still ignores the part about tests most of the time. Other providers and models
+are left alone.
 
 ## Results
 
@@ -69,7 +77,7 @@ pi install git:github.com/filipjoksovic/pi-spark
 
 Then pick "Qwen3.8 Flash Next (Spark)" in pi or start it with `pi --model spark/qwen3.8-flash-next`. You
 don't need to add anything to `models.json`. To update, run `pi update --extensions`, and if you want to stay
-on a fixed version, install `git:github.com/filipjoksovic/pi-spark@v1.1.0` instead.
+on a fixed version, install `git:github.com/filipjoksovic/pi-spark@v1.2.0` instead.
 
 The thinking mode follows pi's own thinking level, so you change it the same way as for any other model:
 
@@ -93,6 +101,8 @@ and if both are set the environment variable wins.
 | `QWEN_THINKING` | `thinking` | follows pi | `off`, `on` or `hybrid`, ignoring pi's level |
 | `QWEN_THINK_EVERY` | `thinkEvery` | `8` | how often hybrid mode re-plans, `0` to never |
 | `QWEN_CALL_LIMIT` | `callLimit` | `80` | tool calls allowed per prompt, `0` for no limit |
+| `QWEN_REWRITE_LIMIT` | `rewriteLimit` | `50` | refuse rewriting an existing file longer than this, `0` to allow |
+| `QWEN_TEST_HINT` | `testHint` | `on` | `off` to drop the system prompt note about editing and testing |
 
 I'd put the URL in `spark.json` rather than your shell profile, because pi started from scripts or other
 apps often doesn't load the profile:

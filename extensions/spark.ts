@@ -23,9 +23,13 @@ import { type ExtensionAPI } from "@earendil-works/pi-coding-agent";
  *   QWEN_THINK_EVERY / thinkEvery   re-plan interval in hybrid mode (default 8, 0 = never)
  *   QWEN_CALL_LIMIT / callLimit     tool calls per prompt before the model is told to finish, and stopped 10 calls
  *                                   later if it keeps going (default 80, 0 = no limit)
+ *   QWEN_REWRITE_LIMIT / rewriteLimit  refuse a write that would replace an existing file longer than this many
+ *                                   lines, so the model edits instead of rewriting (default 50, 0 = off)
+ *   QWEN_TEST_HINT / testHint       on: tell the model to check its work through the project's tests rather than
+ *                                   throwaway scripts, and to edit rather than rewrite files (default on)
  */
 
-type Settings = Partial<Record<"url" | "apiKey" | "model" | "contextWindow" | "thinking" | "thinkEvery" | "callLimit", string | number>>;
+type Settings = Partial<Record<"url" | "apiKey" | "model" | "contextWindow" | "thinking" | "thinkEvery" | "callLimit" | "rewriteLimit" | "testHint", string | number>>;
 
 function loadSettings(): Settings {
 	const file = path.join(process.env.PI_CODING_AGENT_DIR ?? path.join(os.homedir(), ".pi", "agent"), "spark.json");
@@ -44,6 +48,8 @@ export default function (pi: ExtensionAPI) {
 	const every = Number(setting("QWEN_THINK_EVERY", "thinkEvery", "8"));
 	const callLimit = Number(setting("QWEN_CALL_LIMIT", "callLimit", "80"));
 	const forced = setting("QWEN_THINKING", "thinking", "");
+	const rewriteLimit = Number(setting("QWEN_REWRITE_LIMIT", "rewriteLimit", "50"));
+	const testHint = setting("QWEN_TEST_HINT", "testHint", "on") === "on";
 
 	pi.registerProvider("spark", {
 		name: "DGX Spark",
@@ -97,9 +103,40 @@ export default function (pi: ExtensionAPI) {
 		if (callLimit > 0 && calls > callLimit + 10) ctx.abort();
 	});
 
-	pi.on("tool_call", async () => {
-		if (!active || callLimit <= 0 || calls <= callLimit) return undefined;
-		return { block: true, reason: `[budget] ${callLimit} tool calls used for this prompt. Stop calling tools: finish now with what you have, and say what you could not check.` };
+	pi.on("tool_call", async (event, ctx) => {
+		if (!active) return undefined;
+		if (callLimit > 0 && calls > callLimit) {
+			return { block: true, reason: `[budget] ${callLimit} tool calls used for this prompt. Stop calling tools: finish now with what you have, and say what you could not check.` };
+		}
+		// Rewriting a whole file costs every one of its tokens again, which on the Spark is most of the time a task takes.
+		if (rewriteLimit > 0 && event.toolName === "write") {
+			const target = path.resolve(ctx.cwd, (event.input as { path: string }).path);
+			let lines = 0;
+			try {
+				const text = fs.readFileSync(target, "utf8");
+				lines = text.split("\n").length - (text.endsWith("\n") ? 1 : 0);
+			} catch {
+				return undefined;
+			}
+			if (lines > rewriteLimit) {
+				return {
+					block: true,
+					reason: `[edit, don't rewrite] ${(event.input as { path: string }).path} already has ${lines} lines. Use edit to change only the parts that are wrong: one edit call can hold several replacements, and a replacement can cover a whole function.`,
+				};
+			}
+		}
+		return undefined;
+	});
+
+	pi.on("before_agent_start", (event, ctx) => {
+		if (!testHint || ctx.model?.provider !== "spark") return undefined;
+		event.systemPromptOptions.appendSystemPrompt = `${event.systemPromptOptions.appendSystemPrompt ?? ""}
+
+## Working on files
+- Change existing files with edit, touching only the parts that need to change. One edit call can hold several replacements.
+- Check your work through the project's tests: add the checks you need to the test file and rerun the test command after each fix. Do not write throwaway scripts (heredocs, files in /tmp) to try out your code.
+`;
+		return undefined;
 	});
 
 	pi.on("before_provider_request", (event, ctx) => {
